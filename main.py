@@ -65,9 +65,9 @@ def main() -> None:
     for trip in new_trips:
         try:
             send_sms(format_trip(trip), SMS_TO, gmail_addr, gmail_pw)
+            state[trip.key] = trip.outbound.depart_dt.date().isoformat()
         except Exception as e:
             all_errors.append(f"SMS send failed: {e}")
-        state[trip.key] = trip.outbound.depart_dt.date().isoformat()
 
     if is_morning:
         try:
