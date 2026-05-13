@@ -55,8 +55,11 @@ def _search_route(origin: str, destination: str, today: date) -> tuple[list[Roun
 
 
 def main() -> None:
-    gmail_addr, gmail_pw = _gmail_creds()
     today = date.today()
+    if today > date(2026, 9, 10):
+        return
+
+    gmail_addr, gmail_pw = _gmail_creds()
     state = expire_old_trips(load_state(STATE_PATH), today)
     is_morning = _is_morning_run()
 
