@@ -25,23 +25,32 @@ def _is_morning_run() -> bool:
 
 
 def _search_route(origin: str, destination: str, today: date) -> tuple[list[RoundTrip], list[str]]:
-    end = today + timedelta(days=LOOKAHEAD_DAYS)
+    outbound_end = today + timedelta(days=LOOKAHEAD_DAYS)
+    # Inbounds must cover returns for the latest possible outbound (+4 days for Mon return)
+    inbound_end = outbound_end + timedelta(days=4)
     errors: list[str] = []
 
     try:
-        outbounds = search_one_way(origin, destination, today, end)
+        outbounds = search_one_way(origin, destination, today, outbound_end)
     except Exception as e:
         errors.append(f"{origin}>{destination}: {e}")
         outbounds = []
 
     try:
-        inbounds = search_one_way(destination, origin, today, end)
+        inbounds = search_one_way(destination, origin, today, inbound_end)
     except Exception as e:
         errors.append(f"{destination}>{origin}: {e}")
         inbounds = []
 
     outbounds = [f for f in outbounds if is_valid_outbound(f) and is_gowild_price(f)]
     inbounds = [f for f in inbounds if is_valid_inbound(f) and is_gowild_price(f)]
+
+    # Deduplicate by flight key before pairing to avoid redundant SMS alerts
+    seen_out: set[str] = set()
+    seen_in: set[str] = set()
+    outbounds = [f for f in outbounds if not (f.key in seen_out or seen_out.add(f.key))]  # type: ignore[func-returns-value]
+    inbounds = [f for f in inbounds if not (f.key in seen_in or seen_in.add(f.key))]  # type: ignore[func-returns-value]
+
     return pair_round_trips(outbounds, inbounds), errors
 
 
