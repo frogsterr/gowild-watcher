@@ -1,0 +1,37 @@
+name: GoWild Flight Watcher
+
+on:
+  schedule:
+    - cron: '0 15 * * *'   # 8 AM Pacific (UTC-7 summer)
+    - cron: '0 1 * * *'    # 6 PM Pacific
+  workflow_dispatch:        # allow manual trigger from Actions tab
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run watcher
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python main.py
+
+      - name: Commit updated state
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add state/seen_flights.json
+          git diff --staged --quiet || git commit -m "chore: update flight state [skip ci]"
+          git push
