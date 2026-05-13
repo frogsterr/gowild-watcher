@@ -9,7 +9,10 @@ _DEFAULT_PATH = Path("state/seen_flights.json")
 def load_state(path: Path = _DEFAULT_PATH) -> dict[str, str]:
     if not path.exists():
         return {}
-    return json.loads(path.read_text())
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return {}
 
 
 def save_state(state: dict[str, str], path: Path = _DEFAULT_PATH) -> None:
@@ -22,4 +25,12 @@ def find_new_trips(trips: list[RoundTrip], state: dict[str, str]) -> list[RoundT
 
 
 def expire_old_trips(state: dict[str, str], today: date) -> dict[str, str]:
-    return {k: v for k, v in state.items() if date.fromisoformat(v) >= today}
+    result = {}
+    for k, v in state.items():
+        try:
+            if date.fromisoformat(v) >= today:
+                result[k] = v
+        except ValueError:
+            # Skip entries with invalid date strings
+            pass
+    return result

@@ -20,12 +20,12 @@ def test_load_state_returns_empty_dict_when_file_missing():
 
 
 def test_save_and_load_round_trip():
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-        path = Path(f.name)
-    state = {"SFO-LAX-2026-05-14-2026-05-17": "2026-05-14"}
-    save_state(state, path)
-    loaded = load_state(path)
-    assert loaded == state
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "state.json"
+        state = {"SFO-LAX-2026-05-14-2026-05-17": "2026-05-14"}
+        save_state(state, path)
+        loaded = load_state(path)
+        assert loaded == state
 
 
 def test_find_new_trips_all_new():
@@ -75,3 +75,24 @@ def test_save_state_creates_parent_dirs():
         save_state({"key": "value"}, path)
         assert path.exists()
         assert json.loads(path.read_text()) == {"key": "value"}
+
+
+def test_load_state_returns_empty_dict_on_corrupted_json():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "corrupted.json"
+        path.write_text("{ invalid json content }")
+        result = load_state(path)
+        assert result == {}
+
+
+def test_expire_old_trips_skips_invalid_dates():
+    state = {
+        "SFO-LAX-2026-05-01-2026-05-04": "not-a-date",  # invalid
+        "SFO-LAX-2026-05-20-2026-05-23": "2026-05-20",  # valid and future
+        "SFO-LAX-2026-04-10-2026-04-13": "bad date format",  # invalid
+    }
+    today = date(2026, 5, 12)
+    result = expire_old_trips(state, today)
+    assert "SFO-LAX-2026-05-01-2026-05-04" not in result
+    assert "SFO-LAX-2026-05-20-2026-05-23" in result
+    assert "SFO-LAX-2026-04-10-2026-04-13" not in result
