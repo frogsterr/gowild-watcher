@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from watcher.search import _parse_flights, search_one_way
+from watcher.search import _extract_flight_data, _parse_flights, search_one_way
 
 # ---------------------------------------------------------------------------
 # A minimal but real-shape FlightData payload extracted from
@@ -103,6 +103,18 @@ MOCK_HTML = f"<html><body><script>FlightData = '{json.dumps(MOCK_DATA)}';</scrip
 
 
 # ---------------------------------------------------------------------------
+# _extract_flight_data tests
+# ---------------------------------------------------------------------------
+
+
+def test_extract_flight_data_missing_pattern():
+    """_extract_flight_data returns None when the page has no FlightData JS assignment."""
+    # Simulate a 403 redirect page or any page without the expected JS variable.
+    html_no_data = "<html><body><h1>Access Denied</h1></body></html>"
+    assert _extract_flight_data(html_no_data) is None
+
+
+# ---------------------------------------------------------------------------
 # _parse_flights tests
 # ---------------------------------------------------------------------------
 
@@ -177,3 +189,23 @@ def test_search_one_way_calls_api():
     assert len(flights) == 1
     assert flights[0].origin == "SFO"
     assert flights[0].destination == "DEN"
+
+
+def test_search_one_way_multi_day_range():
+    """search_one_way calls requests.get once per day and concatenates results across days."""
+    mock_resp = MagicMock()
+    mock_resp.text = MOCK_HTML
+    mock_resp.raise_for_status = MagicMock()
+
+    begin = date(2026, 5, 13)
+    end = date(2026, 5, 15)  # 3-day range: 13, 14, 15
+
+    with patch("watcher.search.requests.get", return_value=mock_resp) as mock_get:
+        flights = search_one_way("SFO", "DEN", begin, end)
+
+    # One GET per day in the range
+    assert mock_get.call_count == 3
+
+    # Each day's response contains 1 GoWild flight → 3 total
+    assert len(flights) == 3
+    assert all(f.origin == "SFO" and f.destination == "DEN" for f in flights)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import html
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import requests
@@ -51,7 +51,6 @@ def search_one_way(
         if data is not None:
             flights.extend(_parse_flights(origin, destination, data))
         # advance one day
-        from datetime import timedelta
         current += timedelta(days=1)
     return flights
 
@@ -59,6 +58,10 @@ def search_one_way(
 def _extract_flight_data(html_body: str) -> dict[str, Any] | None:
     """Extract the FlightData JSON object embedded in the Frontier booking page."""
     # The page embeds: FlightData = '{ ... }';
+    # NOTE: This regex uses a non-greedy single-quoted match. It will break if
+    # any JSON string value contains a literal single quote character, because
+    # the regex will terminate early at the first unescaped "'". This is a
+    # known limitation; the site currently does not produce such values.
     m = re.search(r"FlightData\s*=\s*'(.*?)';", html_body, re.DOTALL)
     if not m:
         return None
@@ -93,7 +96,7 @@ def _parse_flights(
             if not flight.get("isGoWildFareEnabled"):
                 continue
             gw_total = flight.get("goWildFare")
-            if gw_total is None or gw_total < 0:
+            if gw_total is None or gw_total <= 0:
                 continue
 
             legs = flight.get("legs") or []
