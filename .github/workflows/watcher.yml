@@ -28,7 +28,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python main.py
 
-      - name: Commit updated state
+      - name: Commit updated flight state
         run: |
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
