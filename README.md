@@ -1,19 +1,21 @@
 # GoWild Flight Watcher
 
-Sends SMS alerts twice daily for Frontier Airlines GoWild round-trip flights departing from the Bay Area.
+Sends a formatted HTML email digest twice daily for Frontier Airlines GoWild round-trip flights departing from the Bay Area.
 
 ## What It Does
 
 - Searches SFO, SJC, and OAK for GoWild flights to 17 destinations
-- Filters for valid weekend windows: Thursday 5pm+ or Friday out, Sunday or Monday back
-- Texts you when new flights appear (both runs) + a morning digest of all available trips
-- Deduplicates so you only get alerted once per route/date combo
+- Filters for valid trip windows: Wednesday 5pm+ / Thursday 5pm+ / Friday out, Sunday / Monday / Tuesday back
+- Sends one email per run with the top 3 cheapest deals at the top, then all flights grouped by destination
+- New flights (not seen in a previous run) are highlighted with a **NEW** badge
+- Deduplicates so a route/date combo is only marked new once — but prices always reflect the latest live data
 
-## SMS Format
+## Email Format
 
-```
-SFO>LAX Thu5/21 8:48p>Sun5/24 7:29p $213
-```
+Each run produces a single HTML email with:
+
+1. **Top 3 Deals** — the 3 cheapest available flights as cards, sorted by price
+2. **All Flights by Destination** — every available trip grouped by destination, sorted cheapest-first within each group
 
 ## Setup
 
@@ -32,23 +34,18 @@ Go to **Settings → Secrets and variables → Actions → New repository secret
 
 | Secret | Value |
 |--------|-------|
-| `GMAIL_ADDRESS` | Your Gmail address |
+| `GMAIL_ADDRESS` | Your Gmail address (used to send) |
 | `GMAIL_APP_PASSWORD` | Gmail App Password (not your login password) |
 
 To generate an App Password: Google Account → Security → 2-Step Verification → App passwords.
 
-### 3. Configure your number
+### 3. Configure your email
 
-Edit `watcher/config.py` and set `SMS_TO` to your Verizon number:
+Edit `watcher/config.py` and set `EMAIL_TO` to the address you want to receive digests:
 
 ```python
-SMS_TO = "YOUR10DIGITNUMBER@vtext.com"
+EMAIL_TO = "you@example.com"
 ```
-
-Other carriers:
-- AT&T: `number@txt.att.net`
-- T-Mobile: `number@tmomail.net`
-- Sprint: `number@messaging.sprintpcs.com`
 
 ### 4. Trigger a test run
 
@@ -60,7 +57,7 @@ Runs at **8 AM** and **6 PM Pacific** daily via GitHub Actions through September
 
 ## Destinations
 
-LAX, SAN, SNA, SEA, PDX, YVR, SJU, HNL, OGG, KOA, LIH, ORD, MDW, DEN, JFK, LGA, MDT
+LAX · SAN · SNA · SEA · PDX · YVR · SJU · HNL · OGG · KOA · LIH · ORD · MDW · DEN · JFK · LGA · MDT
 
 ## Requirements
 
