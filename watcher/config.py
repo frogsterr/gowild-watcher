@@ -22,10 +22,13 @@ DESTINATIONS = [
 
 MAX_BASE_FARE = 5.00
 LOOKAHEAD_DAYS = 10
-SMS_TO = "7173799809@vtext.com"
+EMAIL_TO = "bs3612@columbia.edu"
+WEDNESDAY = 2
 THURSDAY = 3
 FRIDAY = 4
 SUNDAY = 6
 MONDAY = 0
-OUTBOUND_THURSDAY_HOUR = 17   # 5 PM
+TUESDAY = 1
+OUTBOUND_EVENING_HOUR = 17    # 5 PM — earliest Wed/Thu evening departure
+OUTBOUND_THURSDAY_HOUR = 17   # kept for back-compat with filter
 RETURN_MONDAY_HOUR = 20       # 8 PM

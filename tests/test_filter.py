@@ -29,8 +29,18 @@ def test_friday_morning_is_valid_outbound():
     assert is_valid_outbound(_flight(dt)) is True
 
 
-def test_wednesday_is_invalid_outbound():
+def test_wednesday_evening_is_valid_outbound():
     dt = datetime(2026, 5, 13, 20, 0)  # Wednesday 8pm
+    assert is_valid_outbound(_flight(dt)) is True
+
+
+def test_wednesday_at_5pm_is_valid_outbound():
+    dt = datetime(2026, 5, 13, 17, 0)  # Wednesday exactly 5pm
+    assert is_valid_outbound(_flight(dt)) is True
+
+
+def test_wednesday_before_5pm_is_invalid_outbound():
+    dt = datetime(2026, 5, 13, 16, 59)  # Wednesday 4:59pm
     assert is_valid_outbound(_flight(dt)) is False
 
 
@@ -61,9 +71,14 @@ def test_monday_after_8pm_is_invalid_inbound():
     assert is_valid_inbound(_flight(dt)) is False
 
 
-def test_tuesday_is_invalid_inbound():
+def test_tuesday_is_valid_inbound():
     dt = datetime(2026, 5, 19, 10, 0)
-    assert is_valid_inbound(_flight(dt)) is False
+    assert is_valid_inbound(_flight(dt)) is True
+
+
+def test_tuesday_evening_is_valid_inbound():
+    dt = datetime(2026, 5, 19, 20, 0)
+    assert is_valid_inbound(_flight(dt)) is True
 
 
 # --- price filter ---

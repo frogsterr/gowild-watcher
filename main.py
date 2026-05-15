@@ -3,11 +3,11 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 import pytz
 
-from watcher.config import ORIGINS, DESTINATIONS, SMS_TO, LOOKAHEAD_DAYS
+from watcher.config import ORIGINS, DESTINATIONS, EMAIL_TO, LOOKAHEAD_DAYS
 from watcher.filter import is_valid_outbound, is_valid_inbound, is_gowild_price
-from watcher.format import format_trip, format_digest
+from watcher.format import format_email_subject, format_email_html
 from watcher.models import RoundTrip
-from watcher.notify import send_sms
+from watcher.notify import send_email
 from watcher.pairing import pair_round_trips
 from watcher.search import search_one_way
 from watcher.state import load_state, save_state, find_new_trips, expire_old_trips
@@ -26,8 +26,7 @@ def _is_morning_run() -> bool:
 
 def _search_route(origin: str, destination: str, today: date) -> tuple[list[RoundTrip], list[str]]:
     outbound_end = today + timedelta(days=LOOKAHEAD_DAYS)
-    # Inbounds must cover returns for the latest possible outbound (+4 days for Mon return)
-    inbound_end = outbound_end + timedelta(days=4)
+    inbound_end = outbound_end + timedelta(days=6)
     errors: list[str] = []
 
     try:
@@ -45,7 +44,6 @@ def _search_route(origin: str, destination: str, today: date) -> tuple[list[Roun
     outbounds = [f for f in outbounds if is_valid_outbound(f) and is_gowild_price(f)]
     inbounds = [f for f in inbounds if is_valid_inbound(f) and is_gowild_price(f)]
 
-    # Deduplicate by flight key before pairing to avoid redundant SMS alerts
     seen_out: set[str] = set()
     seen_in: set[str] = set()
     outbounds = [f for f in outbounds if not (f.key in seen_out or seen_out.add(f.key))]  # type: ignore[func-returns-value]
@@ -61,7 +59,7 @@ def main() -> None:
 
     gmail_addr, gmail_pw = _gmail_creds()
     state = expire_old_trips(load_state(STATE_PATH), today)
-    is_morning = _is_morning_run()
+    run_label = "Morning Run" if _is_morning_run() else "Evening Run"
 
     all_trips: list[RoundTrip] = []
     all_errors: list[str] = []
@@ -74,23 +72,27 @@ def main() -> None:
 
     new_trips = find_new_trips(all_trips, state)
 
-    for trip in new_trips:
-        try:
-            send_sms(format_trip(trip), SMS_TO, gmail_addr, gmail_pw)
-            state[trip.key] = trip.outbound.depart_dt.date().isoformat()
-        except Exception as e:
-            all_errors.append(f"SMS send failed: {e}")
+    subject = format_email_subject(new_trips, run_label)
+    body = format_email_html(new_trips, all_trips, run_label, today)
+    email_sent = False
+    try:
+        send_email(subject, body, EMAIL_TO, gmail_addr, gmail_pw)
+        email_sent = True
+    except Exception as e:
+        all_errors.append(f"Email send failed: {e}")
 
-    if is_morning:
-        try:
-            send_sms(format_digest(all_trips), SMS_TO, gmail_addr, gmail_pw)
-        except Exception as e:
-            all_errors.append(f"Digest SMS failed: {e}")
+    if email_sent:
+        for trip in new_trips:
+            state[trip.key] = trip.outbound.depart_dt.date().isoformat()
 
     if all_errors:
-        error_msg = "GoWild watcher errors:\n" + "\n".join(all_errors[:5])
+        error_body = (
+            "<pre style='font-family:monospace;font-size:13px;'>"
+            + "\n".join(all_errors[:10])
+            + "</pre>"
+        )
         try:
-            send_sms(error_msg, SMS_TO, gmail_addr, gmail_pw)
+            send_email(f"GoWild Watcher Errors · {run_label}", error_body, EMAIL_TO, gmail_addr, gmail_pw)
         except Exception:
             pass
 
