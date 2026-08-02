@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from watcher.search import _extract_flight_data, _parse_flights, search_one_way
 
@@ -51,6 +52,45 @@ _FLIGHT_OBJ_GOWILD = {
     "goWildFareKey": "0~GW~X~F9~GW01PRNW~WILD~~0~1~~X|F9~1094~ ~~SFO~05/13/2026 12:52~DEN~05/13/2026 16:43~~",
     "goWildFareSeatsRemaining": "3 Seats Left!",
     "standardFareKey": "0~N~~F9~N00VXDN~CLUB~~0~13~~X|F9~1094~~",
+}
+
+_FLIGHT_OBJ_CONNECTION = {
+    "discountDenFare": 200.00,
+    "standardFare": 220.00,
+    "milesFare": 0.0,
+    "goWildFare": 18.50,
+    "isGoWildFareEnabled": True,
+    "isMonetary": True,
+    "hasSixPlusLayover": False,
+    "isNextDayArrival": False,
+    "stopCount": 1,
+    "stops": "DEN",
+    "stopsText": "1 Stop",
+    "duration": "5 hrs 10 min",
+    "legs": [
+        {
+            "departureStation": "SFO",
+            "arrivalStation": "DEN",
+            "departureDate": "2026-05-13T09:00:00",
+            "arrivalDate": "2026-05-13T12:51:00",
+            "isNextDayArrival": False,
+            "duration": "02:51:00",
+            "flightNumber": 1094,
+            "carrierCode": "F9",
+        },
+        {
+            "departureStation": "DEN",
+            "arrivalStation": "SEA",
+            "departureDate": "2026-05-13T13:40:00",
+            "arrivalDate": "2026-05-13T15:10:00",
+            "isNextDayArrival": False,
+            "duration": "01:30:00",
+            "flightNumber": 2201,
+            "carrierCode": "F9",
+        },
+    ],
+    "goWildFareKey": "0~GW~X~F9~GW01PRNW~WILD~~0~1~~X|F9~1094~ ~~SFO~05/13/2026 09:00~SEA~05/13/2026 15:10~~",
+    "goWildFareSeatsRemaining": "5 Seats Left!",
 }
 
 _FLIGHT_OBJ_NO_GOWILD = {
@@ -138,6 +178,20 @@ def test_parse_flights_empty():
     assert _parse_flights("SFO", "DEN", data) == []
 
 
+def test_parse_flights_excludes_connections():
+    """Flights with more than one leg (connections) are excluded — direct only."""
+    data = {"journeys": [{"flights": [_FLIGHT_OBJ_CONNECTION]}]}
+    assert _parse_flights("SFO", "SEA", data) == []
+
+
+def test_parse_flights_mix_of_direct_and_connection():
+    """Only the direct flight is returned when both direct and connecting itineraries are present."""
+    data = {"journeys": [{"flights": [_FLIGHT_OBJ_GOWILD, _FLIGHT_OBJ_CONNECTION]}]}
+    flights = _parse_flights("SFO", "DEN", data)
+    assert len(flights) == 1
+    assert flights[0].destination == "DEN"
+
+
 def test_parse_flights_missing_fare():
     """Flight with missing or no GoWild fare is excluded."""
     # goWildFare absent entirely
@@ -174,7 +228,8 @@ def test_search_one_way_calls_api():
     mock_resp.text = MOCK_HTML
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("watcher.search.requests.get", return_value=mock_resp) as mock_get:
+    with patch("watcher.search.requests.get", return_value=mock_resp) as mock_get, \
+         patch("watcher.search.time.sleep"):
         begin = date(2026, 5, 13)
         end = date(2026, 5, 13)
         flights = search_one_way("SFO", "DEN", begin, end)
@@ -200,7 +255,8 @@ def test_search_one_way_multi_day_range():
     begin = date(2026, 5, 13)
     end = date(2026, 5, 15)  # 3-day range: 13, 14, 15
 
-    with patch("watcher.search.requests.get", return_value=mock_resp) as mock_get:
+    with patch("watcher.search.requests.get", return_value=mock_resp) as mock_get, \
+         patch("watcher.search.time.sleep"):
         flights = search_one_way("SFO", "DEN", begin, end)
 
     # One GET per day in the range
@@ -209,3 +265,50 @@ def test_search_one_way_multi_day_range():
     # Each day's response contains 1 GoWild flight → 3 total
     assert len(flights) == 3
     assert all(f.origin == "SFO" and f.destination == "DEN" for f in flights)
+
+
+def test_search_one_way_retries_on_406_then_succeeds():
+    """A transient 406 (bot-protection throttling) is retried and recovers."""
+    blocked_resp = MagicMock()
+    blocked_resp.status_code = 406
+    blocked_resp.raise_for_status.side_effect = requests.HTTPError(response=blocked_resp)
+
+    ok_resp = MagicMock()
+    ok_resp.text = MOCK_HTML
+    ok_resp.raise_for_status = MagicMock()
+
+    with patch("watcher.search.requests.get", side_effect=[blocked_resp, ok_resp]) as mock_get, \
+         patch("watcher.search.time.sleep") as mock_sleep:
+        flights = search_one_way("SFO", "DEN", date(2026, 5, 13), date(2026, 5, 13))
+
+    assert mock_get.call_count == 2
+    assert mock_sleep.called  # backed off before retrying
+    assert len(flights) == 1
+
+
+def test_search_one_way_gives_up_after_max_attempts():
+    """Persistent 406s exhaust retries and raise instead of hanging forever."""
+    blocked_resp = MagicMock()
+    blocked_resp.status_code = 406
+    blocked_resp.raise_for_status.side_effect = requests.HTTPError(response=blocked_resp)
+
+    with patch("watcher.search.requests.get", return_value=blocked_resp) as mock_get, \
+         patch("watcher.search.time.sleep"):
+        with pytest.raises(requests.HTTPError):
+            search_one_way("SFO", "DEN", date(2026, 5, 13), date(2026, 5, 13))
+
+    assert mock_get.call_count == 3  # _MAX_ATTEMPTS
+
+
+def test_search_one_way_does_not_retry_non_transient_error():
+    """A non-bot-protection error (e.g. 404) fails fast without retrying."""
+    not_found_resp = MagicMock()
+    not_found_resp.status_code = 404
+    not_found_resp.raise_for_status.side_effect = requests.HTTPError(response=not_found_resp)
+
+    with patch("watcher.search.requests.get", return_value=not_found_resp) as mock_get, \
+         patch("watcher.search.time.sleep"):
+        with pytest.raises(requests.HTTPError):
+            search_one_way("SFO", "DEN", date(2026, 5, 13), date(2026, 5, 13))
+
+    assert mock_get.call_count == 1

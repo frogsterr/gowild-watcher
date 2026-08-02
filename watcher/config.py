@@ -22,7 +22,7 @@ DESTINATIONS = [
 
 MAX_BASE_FARE = 5.00
 LOOKAHEAD_DAYS = 10
-EMAIL_TO = "bs3612@columbia.edu"
+EMAIL_TO = ["bs3612@columbia.edu", "fh2514@columbia.edu"]
 WEDNESDAY = 2
 THURSDAY = 3
 FRIDAY = 4

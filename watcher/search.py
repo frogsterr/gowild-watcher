@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -23,6 +24,27 @@ _HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+# Frontier's bot protection (PerimeterX) throttles bursts of rapid requests
+# from the same client with 406/429 responses. Pace requests and retry a
+# couple of times with backoff before giving up on a given day.
+_REQUEST_DELAY_SECONDS = 0.4
+_RETRY_STATUS_CODES = {406, 429, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 2.0
+
+
+def _get_with_retry(params: dict[str, str]) -> requests.Response:
+    for attempt in range(_MAX_ATTEMPTS):
+        resp = requests.get(_BOOKING_URL, params=params, headers=_HEADERS, timeout=30)
+        try:
+            resp.raise_for_status()
+            return resp
+        except requests.HTTPError:
+            if resp.status_code not in _RETRY_STATUS_CODES or attempt == _MAX_ATTEMPTS - 1:
+                raise
+            time.sleep(_RETRY_BACKOFF_SECONDS * (attempt + 1))
+    raise AssertionError("unreachable")  # pragma: no cover
+
 
 def search_one_way(
     origin: str,
@@ -30,7 +52,7 @@ def search_one_way(
     begin: date,
     end: date,
 ) -> list[Flight]:
-    """Return GoWild flights from *origin* to *destination* departing between *begin* and *end* (inclusive)."""
+    """Return direct GoWild flights from *origin* to *destination* departing between *begin* and *end* (inclusive)."""
     flights: list[Flight] = []
     current = begin
     while current <= end:
@@ -43,13 +65,11 @@ def search_one_way(
             "mon": "true",
             "promo": "",
         }
-        resp = requests.get(
-            _BOOKING_URL, params=params, headers=_HEADERS, timeout=30
-        )
-        resp.raise_for_status()
+        resp = _get_with_retry(params)
         data = _extract_flight_data(resp.text)
         if data is not None:
             flights.extend(_parse_flights(origin, destination, data))
+        time.sleep(_REQUEST_DELAY_SECONDS)
         # advance one day
         current += timedelta(days=1)
     return flights
@@ -80,7 +100,7 @@ def _parse_flights(
     destination: str,
     data: dict[str, Any],
 ) -> list[Flight]:
-    """Parse a FlightData dict and return GoWild *Flight* objects.
+    """Parse a FlightData dict and return direct (nonstop) GoWild *Flight* objects.
 
     Only flights where ``isGoWildFareEnabled`` is True and ``goWildFare`` > 0
     are included.  The API returns ``goWildFare`` as the total price charged
@@ -88,6 +108,9 @@ def _parse_flights(
 
         base_fare  = 0.01
         taxes_fees = goWildFare - 0.01
+
+    Flights with more than one leg (connections) are excluded — only
+    nonstop itineraries are surfaced.
     """
     flights: list[Flight] = []
     journeys = data.get("journeys") or []
@@ -100,7 +123,7 @@ def _parse_flights(
                 continue
 
             legs = flight.get("legs") or []
-            if not legs:
+            if len(legs) != 1:
                 continue
 
             first_leg = legs[0]
