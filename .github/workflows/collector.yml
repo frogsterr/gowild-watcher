@@ -1,0 +1,39 @@
+name: GoWild Flight Collector
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: gowild-collector
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run collector batch
+        run: python collect.py
+
+      - name: Commit updated sweep state
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add state/sweep_state.json
+          git diff --staged --quiet && exit 0
+          git commit -m "chore: collector sweep batch [skip ci]"
+          git pull --rebase origin master
+          git push

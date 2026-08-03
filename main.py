@@ -1,19 +1,20 @@
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 import pytz
 
-from watcher.config import ORIGINS, DESTINATIONS, EMAIL_TO, LOOKAHEAD_DAYS
+from watcher.cache import load_all_flights, load_sweep_state
+from watcher.config import DESTINATIONS, EMAIL_TO, ORIGINS
 from watcher.filter import is_valid_outbound, is_valid_inbound, is_gowild_price
 from watcher.format import format_email_subject, format_email_html
 from watcher.models import RoundTrip
 from watcher.notify import send_email
 from watcher.pairing import pair_round_trips
-from watcher.search import search_one_way
 from watcher.state import load_state, save_state, find_new_trips, expire_old_trips
 
 PACIFIC = pytz.timezone("America/Los_Angeles")
 STATE_PATH = Path("state/seen_flights.json")
+SWEEP_STATE_PATH = Path("state/sweep_state.json")
 
 
 def _gmail_creds() -> tuple[str, str]:
@@ -24,32 +25,14 @@ def _is_morning_run() -> bool:
     return datetime.now(PACIFIC).hour < 12
 
 
-def _search_route(origin: str, destination: str, today: date) -> tuple[list[RoundTrip], list[str]]:
-    outbound_end = today + timedelta(days=LOOKAHEAD_DAYS)
-    inbound_end = outbound_end + timedelta(days=6)
-    errors: list[str] = []
-
-    try:
-        outbounds = search_one_way(origin, destination, today, outbound_end)
-    except Exception as e:
-        errors.append(f"{origin}>{destination}: {e}")
-        outbounds = []
-
-    try:
-        inbounds = search_one_way(destination, origin, today, inbound_end)
-    except Exception as e:
-        errors.append(f"{destination}>{origin}: {e}")
-        inbounds = []
+def _route_trips(origin: str, destination: str, flights_by_route: dict) -> list[RoundTrip]:
+    outbounds = flights_by_route.get((origin, destination), [])
+    inbounds = flights_by_route.get((destination, origin), [])
 
     outbounds = [f for f in outbounds if is_valid_outbound(f) and is_gowild_price(f)]
     inbounds = [f for f in inbounds if is_valid_inbound(f) and is_gowild_price(f)]
 
-    seen_out: set[str] = set()
-    seen_in: set[str] = set()
-    outbounds = [f for f in outbounds if not (f.key in seen_out or seen_out.add(f.key))]  # type: ignore[func-returns-value]
-    inbounds = [f for f in inbounds if not (f.key in seen_in or seen_in.add(f.key))]  # type: ignore[func-returns-value]
-
-    return pair_round_trips(outbounds, inbounds), errors
+    return pair_round_trips(outbounds, inbounds)
 
 
 def main() -> None:
@@ -61,14 +44,13 @@ def main() -> None:
     state = expire_old_trips(load_state(STATE_PATH), today)
     run_label = "Morning Run" if _is_morning_run() else "Evening Run"
 
-    all_trips: list[RoundTrip] = []
-    all_errors: list[str] = []
+    sweep_state = load_sweep_state(SWEEP_STATE_PATH)
+    flights_by_route = load_all_flights(sweep_state)
 
+    all_trips: list[RoundTrip] = []
     for origin in ORIGINS:
         for destination in DESTINATIONS:
-            trips, errors = _search_route(origin, destination, today)
-            all_trips.extend(trips)
-            all_errors.extend(errors)
+            all_trips.extend(_route_trips(origin, destination, flights_by_route))
 
     new_trips = find_new_trips(all_trips, state)
 
@@ -79,22 +61,14 @@ def main() -> None:
         send_email(subject, body, EMAIL_TO, gmail_addr, gmail_pw)
         email_sent = True
     except Exception as e:
-        all_errors.append(f"Email send failed: {e}")
+        try:
+            send_email(f"GoWild Watcher Errors · {run_label}", f"<pre>Email send failed: {e}</pre>", EMAIL_TO, gmail_addr, gmail_pw)
+        except Exception:
+            pass
 
     if email_sent:
         for trip in new_trips:
             state[trip.key] = trip.outbound.depart_dt.date().isoformat()
-
-    if all_errors:
-        error_body = (
-            "<pre style='font-family:monospace;font-size:13px;'>"
-            + "\n".join(all_errors[:10])
-            + "</pre>"
-        )
-        try:
-            send_email(f"GoWild Watcher Errors · {run_label}", error_body, EMAIL_TO, gmail_addr, gmail_pw)
-        except Exception:
-            pass
 
     save_state(state, STATE_PATH)
 

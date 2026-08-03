@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from watcher.search import _extract_flight_data, _parse_flights, search_one_way
+from watcher.search import _extract_flight_data, _parse_flights, search_one_day, search_one_way
 
 # ---------------------------------------------------------------------------
 # A minimal but real-shape FlightData payload extracted from
@@ -220,6 +220,21 @@ def test_parse_flights_missing_fare():
 # ---------------------------------------------------------------------------
 # search_one_way tests
 # ---------------------------------------------------------------------------
+
+
+def test_search_one_day_single_request():
+    """search_one_day issues exactly one HTTP request for the given day."""
+    mock_resp = MagicMock()
+    mock_resp.text = MOCK_HTML
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("watcher.search.requests.get", return_value=mock_resp) as mock_get:
+        flights = search_one_day("SFO", "DEN", date(2026, 5, 13))
+
+    mock_get.assert_called_once()
+    assert len(flights) == 1
+    assert flights[0].origin == "SFO"
+    assert flights[0].destination == "DEN"
 
 
 def test_search_one_way_calls_api():

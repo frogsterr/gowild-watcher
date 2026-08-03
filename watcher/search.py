@@ -46,6 +46,23 @@ def _get_with_retry(params: dict[str, str]) -> requests.Response:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def search_one_day(origin: str, destination: str, day: date) -> list[Flight]:
+    """Return direct GoWild flights from *origin* to *destination* departing on *day*. One HTTP request."""
+    params = {
+        "o1": origin,
+        "d1": destination,
+        "dd1": day.strftime("%Y-%m-%d"),
+        "ADT": "1",
+        "mon": "true",
+        "promo": "",
+    }
+    resp = _get_with_retry(params)
+    data = _extract_flight_data(resp.text)
+    if data is None:
+        return []
+    return _parse_flights(origin, destination, data)
+
+
 def search_one_way(
     origin: str,
     destination: str,
@@ -56,19 +73,7 @@ def search_one_way(
     flights: list[Flight] = []
     current = begin
     while current <= end:
-        date_str = current.strftime("%Y-%m-%d")
-        params = {
-            "o1": origin,
-            "d1": destination,
-            "dd1": date_str,
-            "ADT": "1",
-            "mon": "true",
-            "promo": "",
-        }
-        resp = _get_with_retry(params)
-        data = _extract_flight_data(resp.text)
-        if data is not None:
-            flights.extend(_parse_flights(origin, destination, data))
+        flights.extend(search_one_day(origin, destination, current))
         time.sleep(_REQUEST_DELAY_SECONDS)
         # advance one day
         current += timedelta(days=1)

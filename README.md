@@ -8,7 +8,21 @@ Sends a formatted HTML email digest twice daily for Frontier Airlines GoWild rou
 - Filters for valid trip windows: Wednesday 5pm+ / Thursday 5pm+ / Friday out, Sunday / Monday / Tuesday back
 - Sends one email per run with the top 3 cheapest deals at the top, then all flights grouped by destination
 - New flights (not seen in a previous run) are highlighted with a **NEW** badge
-- Deduplicates so a route/date combo is only marked new once — but prices always reflect the latest live data
+- Deduplicates so a route/date combo is only marked new once
+
+## Architecture
+
+Frontier's booking site rate-limits bursts of requests (~14 in quick succession), and a
+full sweep needs ~1,400 requests — far more than that in one shot. So fetching and emailing
+are split into two GitHub Actions workflows:
+
+- **Collector** (`collect.py`, every 5 minutes) — fetches a small batch (10 requests) and
+  saves results to `state/sweep_state.json`, picking up where it left off. A full sweep
+  takes ~12 hours. LAX, SAN, and SNA (`PRIORITY_DESTINATIONS` in `watcher/config.py`) are
+  always swept last, so they're the freshest data of any destination at any point in time.
+- **Digest** (`main.py`, 8am/6pm Pacific) — reads whatever's currently in the cache (no
+  live searching) and sends the email. Most routes reflect data up to ~12 hours old;
+  priority destinations are typically only a couple hours old.
 
 ## Email Format
 
@@ -41,10 +55,10 @@ To generate an App Password: Google Account → Security → 2-Step Verification
 
 ### 3. Configure your email
 
-Edit `watcher/config.py` and set `EMAIL_TO` to the address you want to receive digests:
+Edit `watcher/config.py` and set `EMAIL_TO` to the address(es) you want to receive digests:
 
 ```python
-EMAIL_TO = "you@example.com"
+EMAIL_TO = ["you@example.com", "someone-else@example.com"]
 ```
 
 ### 4. Trigger a test run
